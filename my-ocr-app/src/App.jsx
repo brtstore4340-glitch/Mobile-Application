@@ -1,121 +1,164 @@
 import { useState } from 'react';
-import Tesseract from 'tesseract.js';
+import { GoogleGenerativeAI } from "@google/generative-ai";
 import './App.css';
 
 function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [imagePath, setImagePath] = useState(null);
+  const [fileObj, setFileObj] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
   const [resultData, setResultData] = useState(null);
-  const [rawText, setRawText] = useState('');
 
-  // 1. ฟังก์ชัน Login
+  // ✅ ใส่ Key ให้เรียบร้อยแล้วครับ
+  const API_KEY = "AIzaSyD4RrzFQlZX7cIIBk6XG-efWNvtbnQDia8"; 
+
+  // --- Login ---
   const handleLogin = () => {
     if (password === '1234') {
       setIsLoggedIn(true);
     } else {
-      alert('รหัสผ่านผิด (ลองใช้ 1234)');
+      alert('รหัสผ่านผิดครับ (ลอง 1234)');
     }
   };
 
-  // 2. ฟังก์ชันอัปโหลดและอ่านภาพ
+  // --- Upload ---
   const handleImageUpload = (event) => {
     const file = event.target.files[0];
     if (file) {
-      const imageUrl = URL.createObjectURL(file);
-      setImagePath(imageUrl);
-      processImage(imageUrl);
+      setFileObj(file);
+      setImagePath(URL.createObjectURL(file));
+      setResultData(null); // เคลียร์ค่าเก่า
     }
   };
 
-  // 3. AI Process (Logic เดียวกับเวอร์ชันก่อน แต่เขียนแบบ React)
-  const processImage = async (url) => {
+  // --- AI Processing ---
+  async function fileToGenerativePart(file) {
+    const base64EncodedDataPromise = new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(reader.result.split(',')[1]);
+      reader.readAsDataURL(file);
+    });
+    return {
+      inlineData: { data: await base64EncodedDataPromise, mimeType: file.type },
+    };
+  }
+
+  const processImage = async () => {
+    if (!fileObj) return;
     setIsLoading(true);
+
     try {
-      const { data: { text } } = await Tesseract.recognize(url, 'eng', {
-        logger: (m) => console.log(m),
-      });
+      const genAI = new GoogleGenerativeAI(API_KEY);
+      const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
-      setRawText(text);
+      const prompt = `
+        Look at this receipt. Extract these 2 values specifically:
+        1. "TESP AFTER COUPON" (Get the amount, e.g. 41,436.45)
+        2. "CUSTOMER" (Get the number of customers, e.g. 128)
+        
+        Return JSON ONLY: { "tesp": "value", "customer": "value" }
+        If not found, use "-".
+      `;
 
-      // Extract Data Logic
-      const lines = text.split('\n');
-      const extracted = { tesp: null, itemSold: null, amount: null };
+      const imagePart = await fileToGenerativePart(fileObj);
+      const result = await model.generateContent([prompt, imagePart]);
+      const response = await result.response;
+      const text = response.text().replace(/```json|```/g, '').trim();
+      
+      const data = JSON.parse(text);
+      setResultData(data);
 
-      lines.forEach((line) => {
-        const cleanLine = line.toUpperCase();
-        if (cleanLine.includes('TESP')) extracted.tesp = line;
-        if (cleanLine.includes('ITEM SOLD')) {
-            extracted.itemSold = line.replace(/[^0-9]/g, ''); // ดึงเฉพาะตัวเลข
-        }
-        if (cleanLine.includes('AMOUNT') && !cleanLine.includes('OFFLINE')) {
-             extracted.amount = line;
-        }
-      });
-
-      setResultData(extracted);
-    } catch (error) {
-      console.error(error);
-      alert('เกิดข้อผิดพลาดในการอ่านภาพ');
+    } catch (err) {
+      console.error(err);
+      alert("เกิดข้อผิดพลาด: AI อ่านไม่สำเร็จ");
     } finally {
       setIsLoading(false);
     }
   };
 
-  // --- ส่วนแสดงผล (UI) ---
+  // --- หน้าจอ Login ---
   if (!isLoggedIn) {
     return (
-      <div className="container">
-        <h1>🔐 Login System</h1>
-        <input 
-          type="text" placeholder="Username" 
-          value={username} onChange={(e) => setUsername(e.target.value)} 
-        />
-        <input 
-          type="password" placeholder="Password (1234)" 
-          value={password} onChange={(e) => setPassword(e.target.value)} 
-        />
-        <button onClick={handleLogin}>เข้าสู่ระบบ</button>
+      <div className="app-container centered">
+        <div className="card login-card">
+          <div className="icon-bg">🔒</div>
+          <h2>เข้าสู่ระบบ</h2>
+          <p className="subtitle">กรุณาใส่รหัสผ่านเพื่อใช้งาน</p>
+          
+          <input
+            type="password"
+            className="modern-input"
+            placeholder="รหัสผ่าน (1234)"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+          />
+          <button className="modern-btn primary" onClick={handleLogin}>
+            Login เข้าใช้งาน
+          </button>
+        </div>
       </div>
     );
   }
 
+  // --- หน้าจอหลัก ---
   return (
-    <div className="container">
-      <h1>📸 AI Receipt Scanner (React)</h1>
-      
-      <div className="card">
-        <label className="upload-btn">
-          เลือกรูปภาพใบเสร็จ
-          <input type="file" onChange={handleImageUpload} accept="image/*" hidden />
-        </label>
+    <div className="app-container">
+      <header className="app-header">
+        <h1>🧾 Smart Scanner</h1>
+        <p>AI Powered by Gemini</p>
+      </header>
 
+      <div className="card main-card">
+        {/* ส่วนอัปโหลด */}
+        <div className="upload-section">
+          <label className="upload-box">
+            <span className="upload-icon">📸</span>
+            <span>แตะเพื่อถ่ายรูป / เลือกรูป</span>
+            <input type="file" onChange={handleImageUpload} accept="image/*" hidden />
+          </label>
+        </div>
+
+        {/* ส่วนพรีวิวและปุ่มกด */}
         {imagePath && (
-          <img src={imagePath} alt="Preview" className="preview-img" />
-        )}
-
-        {isLoading && <p className="loading">⏳ AI กำลังทำงาน... กรุณารอสักครู่</p>}
-
-        {resultData && !isLoading && (
-          <div className="result-box">
-            <h3>📊 ผลการวิเคราะห์</h3>
-            <ul>
-              <li><strong>TESP:</strong> {resultData.tesp || 'ไม่พบค่า'}</li>
-              <li><strong>Item Sold:</strong> {resultData.itemSold || 'ไม่พบค่า'} ชิ้น</li>
-              <li><strong>Amount:</strong> {resultData.amount || 'ไม่พบค่า'}</li>
-            </ul>
+          <div className="preview-section fade-in">
+            <img src={imagePath} alt="Preview" className="preview-img" />
             
-            <details>
-              <summary>ดูข้อความดิบทั้งหมด</summary>
-              <pre>{rawText}</pre>
-            </details>
+            {!resultData && (
+              <button 
+                className={`modern-btn magic ${isLoading ? 'loading' : ''}`} 
+                onClick={processImage}
+                disabled={isLoading}
+              >
+                {isLoading ? 'กำลังวิเคราะห์...' : '✨ ให้ AI อ่านค่า'}
+              </button>
+            )}
           </div>
         )}
-        
-        <button className="logout-btn" onClick={() => setIsLoggedIn(false)}>Logout</button>
+
+        {/* ส่วนผลลัพธ์ (แสดงการ์ดสวยๆ) */}
+        {resultData && (
+          <div className="results-grid fade-in-up">
+            <div className="result-card blue">
+              <span className="label">TESP AFTER COUPON</span>
+              <span className="value">{resultData.tesp}</span>
+            </div>
+            
+            <div className="result-card purple">
+              <span className="label">CUSTOMER</span>
+              <span className="value">{resultData.customer} <span className="unit">คน</span></span>
+            </div>
+
+            <button className="modern-btn outline" onClick={() => {setImagePath(null); setResultData(null);}}>
+              🔄 สแกนใบใหม่
+            </button>
+          </div>
+        )}
       </div>
+
+      <button className="logout-link" onClick={() => setIsLoggedIn(false)}>
+        ออกจากระบบ
+      </button>
     </div>
   );
 }
